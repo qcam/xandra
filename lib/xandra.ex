@@ -3,7 +3,15 @@ defmodule Xandra do
 
   def start_link(opts \\ []) do
     opts = Keyword.put_new(opts, :host, "127.0.0.1")
-    DBConnection.start_link(Connection, opts)
+
+    if opts[:event_server] do
+      host = to_charlist(opts[:host])
+      port = opts[:port] || 9042
+      {:ok, server} = Supervisor.start_child(Xandra.EventServersSupervisor, [host, port])
+      DBConnection.start_link(Connection, Keyword.put(opts, :event_server, server))
+    else
+      DBConnection.start_link(Connection, opts)
+    end
   end
 
   def stream!(conn, query, params, opts \\ [])

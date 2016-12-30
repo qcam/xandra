@@ -38,7 +38,17 @@ defmodule Xandra.Protocol do
     %{frame | body: body}
   end
 
-  def encode_string_map(map) do
+  def encode_request(%Frame{kind: :register} = frame, events, _opts) when is_list(events) do
+    %{frame | body: encode_string_list(events)}
+  end
+
+  defp encode_string_list(list) do
+    for string <- list, into: <<length(list)::16>> do
+      <<byte_size(string)::16, string::binary>>
+    end
+  end
+
+  defp encode_string_map(map) do
     for {key, value} <- map, into: <<map_size(map)::16>> do
       key_size = byte_size(key)
       <<key_size::16, key::size(key_size)-bytes, byte_size(value)::16, value::bytes>>
@@ -263,6 +273,18 @@ defmodule Xandra.Protocol do
 
   def decode_response(%Frame{kind: :result, body: body}, %Query{} = query) do
     decode_result_response(body, query)
+  end
+
+  def decode_response(%Frame{kind: :event, body: body}, nil) do
+    case decode_string(body) do
+      {"SCHEMA_CHANGE", rest} ->
+        {effect, rest} = decode_string(rest)
+        {target, rest} = decode_string(rest)
+        options = decode_change_options(rest, target)
+        %Xandra.SchemaChange{effect: effect, target: target, options: options}
+      {event, _rest} ->
+        raise "event type #{event} is still unsupported"
+    end
   end
 
   defp decode_result_response(<<0x0001::32-signed>>, _query) do

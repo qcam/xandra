@@ -11,7 +11,9 @@ defmodule Xandra.Mixfile do
   end
 
   def application() do
-    [applications: [:logger]]
+    [applications: [:logger],
+     mod: {Xandra.Application, []},
+     registered: [Xandra.TypeServersSupervisor]]
   end
 
   defp deps() do

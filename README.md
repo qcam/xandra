@@ -18,3 +18,8 @@ If [available in Hex](https://hex.pm/docs/publish), the package can be installed
           [applications: [:xandra]]
         end
 
+
+PRs
+* type parser
+* extract tcp utils
+* event server with just SCHEMA_CHANGE support

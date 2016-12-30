@@ -9,6 +9,7 @@ defmodule Xandra.Frame do
     :query => 0x07,
     :prepare => 0x09,
     :execute => 0x0A,
+    :register => 0x0B,
   }
 
   @response_version 0x83
@@ -18,6 +19,7 @@ defmodule Xandra.Frame do
     0x02 => :ready,
     0x06 => :supported,
     0x08 => :result,
+    0x0C => :event,
   }
 
   def new(kind) do
