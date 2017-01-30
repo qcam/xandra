@@ -8,23 +8,23 @@ defmodule Xandra.Cluster.ControlConnection do
   @default_timeout 5_000
   @socket_options [packet: :raw, mode: :binary, active: false]
 
-  defstruct [:socket]
+  defstruct [:socket, :cluster]
 
-  def start_link(host, port) do
-    Connection.start_link(__MODULE__, {host, port})
+  def start_link(cluster, host, port) do
+    Connection.start_link(__MODULE__, {cluster, host, port})
   end
 
-  def init({_host, _port} = params) do
+  def init(params) do
     {:connect, :init, params}
   end
 
-  def connect(:init, {host, port}) do
-    with {:ok, socket} <- connect(host, port, @socket_options, @default_timeout) |> IO.inspect,
+  def connect(:init, {cluster, host, port}) do
+    with {:ok, socket} <- connect(host, port, @socket_options, @default_timeout),
          {:ok, supported_options} <- Utils.request_options(socket),
          :ok <- startup_connection(socket, supported_options),
          :ok <- register_to_events(socket),
          :ok <- :inet.setopts(socket, active: :once) do
-      {:ok, %__MODULE__{socket: socket}}
+      {:ok, %__MODULE__{socket: socket, cluster: cluster}}
     else
       {:error, reason} ->
         {:stop, :error, reason}
@@ -33,10 +33,10 @@ defmodule Xandra.Cluster.ControlConnection do
 
   def handle_info({:tcp, socket, data}, %{socket: socket} = state) do
     with {:ok, frame} <- decode_frame(data),
-         # %SchemaChange{} = schema_change = Protocol.decode_response(frame),
-         schema_change = Protocol.decode_response(frame),
-         Logger.debug("Received SCHEMA_CHANGE event: #{inspect(schema_change)}"),
+         status_change = Protocol.decode_response(frame),
+         Logger.debug("Received STATUS_CHANGE event: #{inspect(status_change)}"),
          :ok <- :inet.setopts(socket, active: :once) do
+      Xandra.Cluster.node_status(state.cluster, status_change)
       {:noreply, state}
     end
   end

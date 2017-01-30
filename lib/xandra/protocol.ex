@@ -397,13 +397,19 @@ defmodule Xandra.Protocol do
   def decode_response(%Frame{kind: :event, body: body}, nil) do
     {"STATUS_CHANGE", rest} = decode_string(body)
     {change, rest} = decode_string(rest)
-    {address, <<>>} = decode_value(rest, :inet)
-    {change, address}
+    {location, <<>>} = decode_location(rest)
+    {change, location}
   end
 
   def decode_response(%Frame{kind: :result, body: body}, %kind{} = query)
       when kind in [Simple, Prepared, Batch] do
     decode_result_response(body, query)
+  end
+
+  defp decode_location(<<size, buffer::binary>>) do
+    {address, rest} = decode_value(buffer, size, :inet)
+    <<port::32, rest::binary>> = rest
+    {{address, port}, rest}
   end
 
   # Void
