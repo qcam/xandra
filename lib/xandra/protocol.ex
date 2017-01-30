@@ -17,6 +17,10 @@ defmodule Xandra.Protocol do
     %{frame | body: encode_string_map(requested_options)}
   end
 
+  def encode_request(%Frame{kind: :register} = frame, events, _options) when is_list(events) do
+    %{frame | body: encode_string_list(events)}
+  end
+
   def encode_request(%Frame{kind: :query} = frame, %Simple{} = query, options) do
     %{statement: statement, values: values} = query
     body =
@@ -70,6 +74,12 @@ defmodule Xandra.Protocol do
   defp encode_batch_type(:logged), do: <<0>>
   defp encode_batch_type(:unlogged), do: <<1>>
   defp encode_batch_type(:counter), do: <<2>>
+
+  defp encode_string_list(list) do
+    for string <- list, into: <<length(list)::16>> do
+      <<byte_size(string)::16, string::binary>>
+    end
+  end
 
   defp encode_string_map(map) do
     for {key, value} <- map, into: <<map_size(map)::16>> do
@@ -382,6 +392,13 @@ defmodule Xandra.Protocol do
   def decode_response(%Frame{kind: :supported, body: body}, nil) do
     {content, <<>>} = decode_string_multimap(body)
     content
+  end
+
+  def decode_response(%Frame{kind: :event, body: body}, nil) do
+    {"STATUS_CHANGE", rest} = decode_string(body)
+    {change, rest} = decode_string(rest)
+    {address, <<>>} = decode_value(rest, :inet)
+    {change, address}
   end
 
   def decode_response(%Frame{kind: :result, body: body}, %kind{} = query)
