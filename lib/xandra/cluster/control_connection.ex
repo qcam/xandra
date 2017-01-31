@@ -36,7 +36,7 @@ defmodule Xandra.Cluster.ControlConnection do
          status_change = Protocol.decode_response(frame),
          Logger.debug("Received STATUS_CHANGE event: #{inspect(status_change)}"),
          :ok <- :inet.setopts(socket, active: :once) do
-      Xandra.Cluster.node_status(state.cluster, status_change)
+      Xandra.Cluster.update(state.cluster, status_change)
       {:noreply, state}
     end
   end

@@ -43,8 +43,8 @@ defmodule Xandra.Cluster do
     DBConnection.Poolboy.checkin(pool_ref, conn_state, options)
   end
 
-  def node_status(cluster, status_change) do
-    GenServer.cast(cluster, {:node_status, status_change})
+  def update(cluster, status_change) do
+    GenServer.cast(cluster, {:update, status_change})
   end
 
   def disconnect(pool_ref, error, conn_state, options) do
@@ -60,7 +60,11 @@ defmodule Xandra.Cluster do
     {:reply, DBConnection.Poolboy.checkout(pool, options), state}
   end
 
-  def handle_cast({:node_status, _status_change}, %__MODULE__{} = state) do
+  def handle_cast({:update, {"UP", {address, _port}}}, %__MODULE__{} = state) do
+    {:noreply, state}
+  end
+
+  def handle_cast({:update, {"DOWN", {address, _port}}}, %__MODULE__{} = state) do
     {:noreply, state}
   end
 end
