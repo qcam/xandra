@@ -63,31 +63,21 @@ defmodule Xandra.Cluster do
   end
 
   def handle_cast({:update, {"UP", {address, _port}}}, %__MODULE__{} = state) do
-    state =
-      case Map.pop(state.idle, address) do
-        {nil, _idle} ->
-          state
-        {connection, idle} ->
-          active = Map.put(state.active, address, connection)
-          %{state | active: active, idle: idle}
-      end
-    IO.inspect state
-    {:noreply, state}
+    {idle, active} = move_connection(state.idle, state.active, address)
+    {:noreply, %{state | active: active, idle: idle}} |> IO.inspect
   end
 
   def handle_cast({:update, {"DOWN", {address, _port}}}, %__MODULE__{} = state) do
-    state =
-      case Map.pop(state.active, address) do
-        {nil, _active} ->
-          state
-        {connection, active} ->
-          idle = Map.put(state.idle, address, connection)
-          %{state | active: active, idle: idle}
-      end
-    IO.inspect state
-    {:noreply, state}
+    {active, idle} = move_connection(state.active, state.idle, address)
+    {:noreply, %{state | active: active, idle: idle}} |> IO.inspect
   end
 
-  # defp move_connection() do
-  # end
+  defp move_connection(source, target, address) do
+    case Map.pop(source, address) do
+      {nil, _source} ->
+        {source, target}
+      {connection, source} ->
+        {source, Map.put(target, address, connection)}
+    end
+  end
 end
