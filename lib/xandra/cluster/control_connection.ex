@@ -8,7 +8,7 @@ defmodule Xandra.Cluster.ControlConnection do
   @default_timeout 5_000
   @socket_options [packet: :raw, mode: :binary, active: false]
 
-  defstruct [:socket, :cluster]
+  defstruct [:socket, :cluster, buffer: <<>>]
 
   def start_link(cluster, host, port) do
     Connection.start_link(__MODULE__, {cluster, host, port})
@@ -23,7 +23,7 @@ defmodule Xandra.Cluster.ControlConnection do
          {:ok, supported_options} <- Utils.request_options(socket),
          :ok <- startup_connection(socket, supported_options),
          :ok <- register_to_events(socket),
-         :ok <- :inet.setopts(socket, active: :once) do
+         :ok <- :inet.setopts(socket, active: :true) do
       {:ok, %__MODULE__{socket: socket, cluster: cluster}}
     else
       {:error, reason} ->
@@ -32,12 +32,15 @@ defmodule Xandra.Cluster.ControlConnection do
   end
 
   def handle_info({:tcp, socket, data}, %{socket: socket} = state) do
-    with {:ok, frame} <- decode_frame(data),
-         status_change = Protocol.decode_response(frame),
-         Logger.debug("Received STATUS_CHANGE event: #{inspect(status_change)}"),
-         :ok <- :inet.setopts(socket, active: :once) do
-      Xandra.Cluster.update(state.cluster, status_change)
-      {:noreply, state}
+    # TODO: move to function
+    case decode_frame(state.buffer <> data) do
+      {:ok, frame, buffer} ->
+        status_change = Protocol.decode_response(frame)
+        Logger.debug("Received STATUS_CHANGE event: #{inspect(status_change)}")
+        Xandra.Cluster.update(state.cluster, status_change)
+        {:noreply, %{state | buffer: buffer}}
+      {:more, buffer} ->
+        {:noreply, %{state | buffer: buffer}}
     end
   end
 
@@ -69,9 +72,17 @@ defmodule Xandra.Cluster.ControlConnection do
 
   defp decode_frame(data) do
     header_length = Frame.header_length()
-    <<header::size(header_length)-bytes, rest::binary>> = data
-    body_length = Frame.body_length(header)
-    <<body::size(body_length)-bytes>> = rest
-    {:ok, Frame.decode(header, body)}
+    case data do
+      <<header::size(header_length)-bytes, rest::binary>> ->
+        body_length = Frame.body_length(header)
+        case rest do
+          <<body::size(body_length)-bytes, rest::binary>> ->
+            {:ok, Frame.decode(header, body), rest}
+          _ ->
+            {:more, data}
+        end
+      _ ->
+        {:more, data}
+    end
   end
 end
