@@ -1,7 +1,7 @@
 defmodule Xandra.Cluster do
   @behaviour DBConnection.Pool
 
-  alias __MODULE__.ControlConnection
+  alias __MODULE__.{ControlConnection, StatusChange}
 
   defstruct [active: %{}, idle: %{}]
 
@@ -38,7 +38,7 @@ defmodule Xandra.Cluster do
   end
 
   def checkout(cluster, options) do
-    GenServer.call(cluster, {:checkout, options})
+    GenServer.call(cluster, {:checkout, options}) |> IO.inspect
   end
 
   def checkin(pool_ref, conn_state, options) do
@@ -62,14 +62,18 @@ defmodule Xandra.Cluster do
     {:reply, DBConnection.Connection.checkout(pool, options), state}
   end
 
-  def handle_cast({:update, {"UP", {address, _port}}}, %__MODULE__{} = state) do
-    {idle, active} = move_connection(state.idle, state.active, address)
-    {:noreply, %{state | active: active, idle: idle}} |> IO.inspect
+  def handle_cast({:update, %StatusChange{} = status_change}, %__MODULE__{} = state) do
+    {:noreply, toggle_connection(state, status_change)} |> IO.inspect
   end
 
-  def handle_cast({:update, {"DOWN", {address, _port}}}, %__MODULE__{} = state) do
+  defp toggle_connection(state, %{effect: "UP", address: address}) do
+    {idle, active} = move_connection(state.idle, state.active, address)
+    %{state | active: active, idle: idle}
+  end
+
+  defp toggle_connection(state, %{effect: "DOWN", address: address}) do
     {active, idle} = move_connection(state.active, state.idle, address)
-    {:noreply, %{state | active: active, idle: idle}} |> IO.inspect
+    %{state | active: active, idle: idle}
   end
 
   defp move_connection(source, target, address) do

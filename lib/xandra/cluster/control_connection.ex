@@ -32,16 +32,7 @@ defmodule Xandra.Cluster.ControlConnection do
   end
 
   def handle_info({:tcp, socket, data}, %{socket: socket} = state) do
-    # TODO: move to function
-    case decode_frame(state.buffer <> data) do
-      {:ok, frame, buffer} ->
-        status_change = Protocol.decode_response(frame)
-        Logger.debug("Received STATUS_CHANGE event: #{inspect(status_change)}")
-        Xandra.Cluster.update(state.cluster, status_change)
-        {:noreply, %{state | buffer: buffer}}
-      {:more, buffer} ->
-        {:noreply, %{state | buffer: buffer}}
-    end
+    {:noreply, %{state | buffer: maybe_report_event(state.cluster, state.buffer <> data)}}
   end
 
   defp connect(host, port, options, timeout) do
@@ -70,19 +61,31 @@ defmodule Xandra.Cluster.ControlConnection do
     end
   end
 
-  defp decode_frame(data) do
+  defp maybe_report_event(cluster, buffer) do
+    case decode_frame(buffer) do
+      {frame, rest} ->
+        status_change = Protocol.decode_response(frame)
+        Logger.debug("Received STATUS_CHANGE event: #{inspect(status_change)}")
+        Xandra.Cluster.update(cluster, status_change)
+        rest
+      :error ->
+        buffer
+    end
+  end
+
+  defp decode_frame(buffer) do
     header_length = Frame.header_length()
-    case data do
+    case buffer do
       <<header::size(header_length)-bytes, rest::binary>> ->
         body_length = Frame.body_length(header)
         case rest do
           <<body::size(body_length)-bytes, rest::binary>> ->
-            {:ok, Frame.decode(header, body), rest}
+            {Frame.decode(header, body), rest}
           _ ->
-            {:more, data}
+            :error
         end
       _ ->
-        {:more, data}
+        :error
     end
   end
 end
