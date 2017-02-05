@@ -398,7 +398,7 @@ defmodule Xandra.Protocol do
   def decode_response(%Frame{kind: :event, body: body}, nil) do
     {"STATUS_CHANGE", rest} = decode_string(body)
     {effect, rest} = decode_string(rest)
-    {address, port, <<>>} = decode_location(rest)
+    {address, port, <<>>} = decode_peer(rest)
     %StatusChange{effect: effect, address: address, port: port}
   end
 
@@ -407,7 +407,7 @@ defmodule Xandra.Protocol do
     decode_result_response(body, query)
   end
 
-  defp decode_location(<<size, buffer::binary>>) do
+  defp decode_peer(<<size, buffer::binary>>) do
     {address, rest} = decode_value(buffer, size, :inet)
     <<port::32, rest::binary>> = rest
     {address, port, rest}

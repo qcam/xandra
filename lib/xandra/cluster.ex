@@ -3,7 +3,7 @@ defmodule Xandra.Cluster do
 
   alias __MODULE__.{ControlConnection, StatusChange}
 
-  defstruct [active: %{}, idle: %{}]
+  defstruct [:options, active: %{}, idle: %{}]
 
   def ensure_all_started(_opts, _type) do
     {:ok, []}
@@ -13,27 +13,24 @@ defmodule Xandra.Cluster do
     Supervisor.Spec.worker(__MODULE__, [module, options], child_options)
   end
 
-  def start_link(module, options) do
+  def start_link(Xandra.Connection, options) do
+    # TODO: Remove.
+    options = Keyword.put(options, :nodes, [{'127.0.0.1', 9042}, {'127.0.0.2', 9042}, {'127.0.0.3', 9042}])
+
     {name, options} = Keyword.pop(options, :name)
-    GenServer.start_link(__MODULE__, {module, options}, name: name)
+    GenServer.start_link(__MODULE__, options, name: name)
   end
 
-  def init({module, options}) do
+  def init(options) do
     {nodes, options} = Keyword.pop(options, :nodes)
-    [{host, port} | _] = nodes = [{'127.0.0.1', 9042}, {'127.0.0.2', 9042}, {'127.0.0.3', 9042}]
-    {:ok, _pid} = ControlConnection.start_link(self(), host, port)
-    active = start_connections(module, nodes, options)
-    {:ok, %__MODULE__{active: active}}
+    start_controll_connections(nodes)
+    {:ok, %__MODULE__{options: options}}
   end
 
-  defp start_connections(module, nodes, options) do
-    # TODO: use "host:port".
-    for {host, port} <- nodes, into: %{} do
-      options = [host: host, port: port] ++ options
-      options = Keyword.put(options, :prepared_cache, Xandra.Prepared.Cache.new)
-      {:ok, pid} = DBConnection.Connection.start_link(module, options)
-      {:ok, address} = :inet.parse_address(host)
-      {address, pid}
+  defp start_controll_connections(nodes) do
+    cluster = self()
+    for {host, port} <- nodes do
+      ControlConnection.start_link(cluster, host, port)
     end
   end
 
@@ -43,6 +40,10 @@ defmodule Xandra.Cluster do
 
   def checkin(pool_ref, conn_state, options) do
     DBConnection.Connection.checkin(pool_ref, conn_state, options)
+  end
+
+  def start_pool(cluster, address, port) do
+    GenServer.cast(cluster, {:start_pool, address, port})
   end
 
   def update(cluster, status_change) do
@@ -59,29 +60,37 @@ defmodule Xandra.Cluster do
 
   def handle_call({:checkout, options}, _from, %__MODULE__{} = state) do
     {_address, pool} = Enum.random(state.active)
+    # pool = Map.fetch!(state.active, {127, 0, 0, 2})
     {:reply, DBConnection.Connection.checkout(pool, options), state}
   end
 
+  def handle_cast({:start_pool, address, port}, %__MODULE__{} = state) do
+    %{options: options, active: active} = state
+    options = [host: address, port: port] ++ options
+    {:ok, pool} = DBConnection.Connection.start_link(Xandra.Connection, options)
+    {:noreply, %{state | active: Map.put(active, address, pool)}}
+  end
+
   def handle_cast({:update, %StatusChange{} = status_change}, %__MODULE__{} = state) do
-    {:noreply, toggle_connection(state, status_change)} |> IO.inspect
+    {:noreply, toggle_pool(state, status_change)} |> IO.inspect
   end
 
-  defp toggle_connection(state, %{effect: "UP", address: address}) do
-    {idle, active} = move_connection(state.idle, state.active, address)
+  defp toggle_pool(state, %{effect: "UP", address: address}) do
+    {idle, active} = move_pool(state.idle, state.active, address)
     %{state | active: active, idle: idle}
   end
 
-  defp toggle_connection(state, %{effect: "DOWN", address: address}) do
-    {active, idle} = move_connection(state.active, state.idle, address)
+  defp toggle_pool(state, %{effect: "DOWN", address: address}) do
+    {active, idle} = move_pool(state.active, state.idle, address)
     %{state | active: active, idle: idle}
   end
 
-  defp move_connection(source, target, address) do
+  defp move_pool(source, target, address) do
     case Map.pop(source, address) do
       {nil, _source} ->
         {source, target}
-      {connection, source} ->
-        {source, Map.put(target, address, connection)}
+      {pool, source} ->
+        {source, Map.put(target, address, pool)}
     end
   end
 end

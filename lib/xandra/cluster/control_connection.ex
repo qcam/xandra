@@ -8,36 +8,66 @@ defmodule Xandra.Cluster.ControlConnection do
   @default_timeout 5_000
   @socket_options [packet: :raw, mode: :binary, active: false]
 
-  defstruct [:socket, :cluster, buffer: <<>>]
+  defstruct [:socket, :address, :port, :cluster, buffer: <<>>]
 
-  def start_link(cluster, host, port) do
-    Connection.start_link(__MODULE__, {cluster, host, port})
+  def start_link(cluster, address, port) do
+    state = %__MODULE__{cluster: cluster, address: address, port: port}
+    Connection.start_link(__MODULE__, state)
   end
 
-  def init(params) do
-    {:connect, :init, params}
+  def init(state) do
+    {:connect, :init, state}
   end
 
-  def connect(:init, {cluster, host, port}) do
-    with {:ok, socket} <- connect(host, port, @socket_options, @default_timeout),
-         {:ok, supported_options} <- Utils.request_options(socket),
-         :ok <- startup_connection(socket, supported_options),
-         :ok <- register_to_events(socket),
-         :ok <- :inet.setopts(socket, active: :true) do
-      {:ok, %__MODULE__{socket: socket, cluster: cluster}}
-    else
-      {:error, reason} ->
-        {:stop, :error, reason}
+  def connect(action, %__MODULE__{address: address, port: port} = state) do
+    case :gen_tcp.connect(address, port, @socket_options, @default_timeout) do
+      {:ok, socket} ->
+        send(self(), {:activate, action})
+        {:ok, %{state | socket: socket}}
+      {:error, _reason} ->
+        {:backoff, 5_000, state}
     end
   end
 
-  def handle_info({:tcp, socket, data}, %{socket: socket} = state) do
-    {:noreply, %{state | buffer: maybe_report_event(state.cluster, state.buffer <> data)}}
+  def handle_info({:activate, action}, %__MODULE__{socket: socket} = state) do
+    with {:ok, supported_options} <- Utils.request_options(socket),
+         :ok <- startup_connection(socket, supported_options),
+         :ok <- register_to_events(socket),
+         :ok <- :inet.setopts(socket, active: :true),
+         {:ok, state} <- report_active(action, state) do
+      {:noreply, state}
+    else
+      {:error, reason} -> {:disconnect, {:error, reason}, state}
+    end
   end
 
-  defp connect(host, port, options, timeout) do
-    with {:error, reason} <- :gen_tcp.connect(host, port, options, timeout),
-         do: {:error, reason}
+  def handle_info({:tcp_error, socket, reason}, %__MODULE__{socket: socket} = state) do
+    {:disconnect, {:error, reason}, state}
+  end
+
+  def handle_info({:tcp_closed, socket}, %__MODULE__{socket: socket} = state) do
+    {:disconnect, {:error, :closed}, state}
+  end
+
+  def handle_info({:tcp, socket, data}, %__MODULE__{socket: socket} = state) do
+    state = %{state | buffer: state.buffer <> data}
+    {:noreply, report_event(state)}
+  end
+
+  def disconnect({:error, _reason}, %__MODULE__{} = state) do
+    :gen_tcp.close(state.socket)
+    {:connect, :reconnect, %{state | socket: nil, buffer: <<>>}}
+  end
+
+  defp report_active(:init, %{cluster: cluster, socket: socket} = state) do
+    with {:ok, {address, port}} <- :inet.peername(socket) do
+      Xandra.Cluster.start_pool(cluster, address, port)
+      %{state | address: address}
+    end
+  end
+
+  defp report_active(_action, state) do
+    {:ok, state}
   end
 
   defp startup_connection(socket, supported_options) do
@@ -61,15 +91,15 @@ defmodule Xandra.Cluster.ControlConnection do
     end
   end
 
-  defp maybe_report_event(cluster, buffer) do
+  defp report_event(%{cluster: cluster, buffer: buffer} = state) do
     case decode_frame(buffer) do
       {frame, rest} ->
         status_change = Protocol.decode_response(frame)
         Logger.debug("Received STATUS_CHANGE event: #{inspect(status_change)}")
         Xandra.Cluster.update(cluster, status_change)
-        rest
+        %{state | buffer: rest}
       :error ->
-        buffer
+        state
     end
   end
 
