@@ -22,22 +22,20 @@ defmodule Xandra.Cluster.ControlConnection do
   def connect(_action, %__MODULE__{address: address, port: port} = state) do
     case :gen_tcp.connect(address, port, @socket_options, @default_timeout) do
       {:ok, socket} ->
-        send(self(), :activate)
-        {:ok, %{state | socket: socket}}
+        state = %{state | socket: socket}
+        with {:ok, supported_options} <- Utils.request_options(socket),
+             :ok <- startup_connection(socket, supported_options),
+             :ok <- register_to_events(socket),
+             :ok <- :inet.setopts(socket, active: :true),
+             {:ok, state} <- report_active(state) do
+          {:noreply, state}
+        else
+          {:error, _reason} = error ->
+            {:connect, :reconnect, state} = disconnect(error, state)
+            {:backoff, 5_000, state}
+        end
       {:error, _reason} ->
         {:backoff, 5_000, state}
-    end
-  end
-
-  def handle_info(:activate, %__MODULE__{socket: socket} = state) do
-    with {:ok, supported_options} <- Utils.request_options(socket),
-         :ok <- startup_connection(socket, supported_options),
-         :ok <- register_to_events(socket),
-         :ok <- :inet.setopts(socket, active: :true),
-         {:ok, state} <- report_active(state) do
-      {:noreply, state}
-    else
-      {:error, reason} -> {:disconnect, {:error, reason}, state}
     end
   end
 
