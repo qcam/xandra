@@ -277,6 +277,10 @@ defmodule Xandra.Protocol do
     <<int::32>>
   end
 
+  defp encode_value(:smallint, int) when is_integer(int) do
+    <<int::16-unsigned>>
+  end
+
   defp encode_value({:list, [items_type]}, list) when is_list(list) do
     for item <- list,
         into: <<length(list)::32>>,
@@ -563,6 +567,10 @@ defmodule Xandra.Protocol do
   end
 
   defp decode_value(<<value::32-signed>> <> buffer, 4, :int) do
+    {value, buffer}
+  end
+
+  defp decode_value(<<value::16-unsigned>> <> buffer, 2, {:custom, "org.apache.cassandra.db.marshal.ShortType"}) do
     {value, buffer}
   end
 

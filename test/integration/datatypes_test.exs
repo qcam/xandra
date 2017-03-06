@@ -13,6 +13,7 @@ defmodule DataTypesTest do
      double double,
      float float,
      inet inet,
+     smallint smallint,
      int int,
      text text,
      timestamp timestamp,
@@ -54,6 +55,7 @@ defmodule DataTypesTest do
      double,
      float,
      inet,
+     smallint,
      int,
      text,
      timestamp,
@@ -61,7 +63,7 @@ defmodule DataTypesTest do
      uuid,
      varchar,
      varint)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """
     values = [
       {"int", 2},
@@ -73,6 +75,7 @@ defmodule DataTypesTest do
       {"double", 3.1415},
       {"float", -1.25},
       {"inet", {192, 168, 0, 1}},
+      {"smallint", 10},
       {"int", 42},
       {"text", "эликсир"},
       {"timestamp", 2167219200},
@@ -92,6 +95,7 @@ defmodule DataTypesTest do
     assert Map.fetch!(row, "double") == 3.1415
     assert Map.fetch!(row, "float") == -1.25
     assert Map.fetch!(row, "inet") == {192, 168, 0, 1}
+    assert Map.fetch!(row, "smallint") == 10
     assert Map.fetch!(row, "int") == 42
     assert Map.fetch!(row, "text") == "эликсир"
     assert Map.fetch!(row, "timestamp") == 2167219200
